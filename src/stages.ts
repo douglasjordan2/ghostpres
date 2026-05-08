@@ -202,12 +202,10 @@ function compileAccumulator(acc: Accumulator, ctx: Ctx): Sql {
     return sql`to_jsonb(avg(${c}))`;
   }
   if ("$min" in acc) {
-    const c = coerce(compileExpr(acc.$min, ctx), "jsonb").sql;
-    return sql`min(${c})`;
+    return sql`to_jsonb(min(${maxableExpr(acc.$min, ctx)}))`;
   }
   if ("$max" in acc) {
-    const c = coerce(compileExpr(acc.$max, ctx), "jsonb").sql;
-    return sql`max(${c})`;
+    return sql`to_jsonb(max(${maxableExpr(acc.$max, ctx)}))`;
   }
   if ("$first" in acc) {
     const c = coerce(compileExpr(acc.$first, ctx), "jsonb").sql;
@@ -296,6 +294,14 @@ function compileAccumulator(acc: Accumulator, ctx: Ctx): Sql {
     return sql`to_jsonb((array_agg(${c}))[greatest(count(*) - ${n} + 1, 1)::int : count(*)::int])`;
   }
   throw new Error(`unsupported accumulator: ${JSON.stringify(acc)}`);
+}
+
+function maxableExpr(expr: import("./types.ts").Expr, ctx: Ctx): Sql {
+  const compiled = compileExpr(expr, ctx);
+  if (compiled.kind === "jsonb" || compiled.kind === "unknown") {
+    return sql`(${compiled.sql}#>>'{}')`;
+  }
+  return compiled.sql;
 }
 
 function compileSortByOrder(spec: SortSpec, ctx: Ctx, reverse: boolean): Sql {

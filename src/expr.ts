@@ -460,15 +460,20 @@ function compileMatchValue(field: Sql, value: Expr, ctx: Ctx, path: string[]): S
     }
     return parts.length === 1 ? parts[0]! : sql`(${sql.join(parts, " and ")})`;
   }
-  return sql`(${field} = ${literalToJsonb(value)})`;
+  return matchEquality(field, value);
+}
+
+function matchEquality(field: Sql, value: Expr): Sql {
+  const literal = literalToJsonb(value);
+  return sql`(${field} = ${literal} or (jsonb_typeof(${field}) = 'array' and ${field} @> jsonb_build_array(${literal})))`;
 }
 
 function compileMatchOp(field: Sql, op: string, arg: Expr, ctx: Ctx, path: string[]): Sql {
   switch (op) {
     case "$eq":
-      return sql`(${field} = ${literalToJsonb(arg)})`;
+      return matchEquality(field, arg);
     case "$ne":
-      return sql`(${field} is distinct from ${literalToJsonb(arg)})`;
+      return sql`(not (${matchEquality(field, arg)}))`;
     case "$gt":
       return cmpAsTyped(field, ">", arg);
     case "$gte":
