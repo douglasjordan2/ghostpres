@@ -24,6 +24,7 @@ import type {
   ReplaceRootStage,
   Document,
   Accumulator,
+  SortSpec,
 } from "./types.ts";
 
 export type StageInput = {
@@ -227,7 +228,87 @@ function compileAccumulator(acc: Accumulator, ctx: Ctx): Sql {
   if ("$count" in acc) {
     return sql`to_jsonb(count(*))`;
   }
+  if ("$stdDevPop" in acc) {
+    const c = coerce(compileExpr(acc.$stdDevPop, ctx), "numeric").sql;
+    return sql`to_jsonb(stddev_pop(${c}))`;
+  }
+  if ("$stdDevSamp" in acc) {
+    const c = coerce(compileExpr(acc.$stdDevSamp, ctx), "numeric").sql;
+    return sql`to_jsonb(stddev_samp(${c}))`;
+  }
+  if ("$mergeObjects" in acc) {
+    const c = coerce(compileExpr(acc.$mergeObjects, ctx), "jsonb").sql;
+    return sql`coalesce(
+      (select jsonb_object_agg(__k, __v)
+       from jsonb_array_elements(jsonb_agg(${c})) as __o,
+            jsonb_each(__o) as __e(__k, __v)),
+      '{}'::jsonb
+    )`;
+  }
+  if ("$top" in acc) {
+    const out = coerce(compileExpr(acc.$top.output, ctx), "jsonb").sql;
+    const order = compileSortByOrder(acc.$top.sortBy, ctx, false);
+    return sql`(array_agg(${out} order by ${order}))[1]`;
+  }
+  if ("$bottom" in acc) {
+    const out = coerce(compileExpr(acc.$bottom.output, ctx), "jsonb").sql;
+    const order = compileSortByOrder(acc.$bottom.sortBy, ctx, true);
+    return sql`(array_agg(${out} order by ${order}))[1]`;
+  }
+  if ("$topN" in acc) {
+    const out = coerce(compileExpr(acc.$topN.output, ctx), "jsonb").sql;
+    const order = compileSortByOrder(acc.$topN.sortBy, ctx, false);
+    const n = acc.$topN.n;
+    return sql`to_jsonb((array_agg(${out} order by ${order}))[1:${n}])`;
+  }
+  if ("$bottomN" in acc) {
+    const out = coerce(compileExpr(acc.$bottomN.output, ctx), "jsonb").sql;
+    const order = compileSortByOrder(acc.$bottomN.sortBy, ctx, true);
+    const n = acc.$bottomN.n;
+    return sql`to_jsonb((array_agg(${out} order by ${order}))[1:${n}])`;
+  }
+  if ("$minN" in acc) {
+    const c = coerce(compileExpr(acc.$minN.input, ctx), "jsonb").sql;
+    const n = acc.$minN.n;
+    return sql`to_jsonb((array_agg(${c} order by ${c} asc nulls last))[1:${n}])`;
+  }
+  if ("$maxN" in acc) {
+    const c = coerce(compileExpr(acc.$maxN.input, ctx), "jsonb").sql;
+    const n = acc.$maxN.n;
+    return sql`to_jsonb((array_agg(${c} order by ${c} desc nulls last))[1:${n}])`;
+  }
+  if ("$firstN" in acc) {
+    const c = coerce(compileExpr(acc.$firstN.input, ctx), "jsonb").sql;
+    const n = acc.$firstN.n;
+    if (acc.$firstN.sortBy) {
+      const order = compileSortByOrder(acc.$firstN.sortBy, ctx, false);
+      return sql`to_jsonb((array_agg(${c} order by ${order}))[1:${n}])`;
+    }
+    return sql`to_jsonb((array_agg(${c}))[1:${n}])`;
+  }
+  if ("$lastN" in acc) {
+    const c = coerce(compileExpr(acc.$lastN.input, ctx), "jsonb").sql;
+    const n = acc.$lastN.n;
+    if (acc.$lastN.sortBy) {
+      const order = compileSortByOrder(acc.$lastN.sortBy, ctx, true);
+      return sql`to_jsonb((array_agg(${c} order by ${order}))[1:${n}])`;
+    }
+    return sql`to_jsonb((array_agg(${c}))[greatest(count(*) - ${n} + 1, 1)::int : count(*)::int])`;
+  }
   throw new Error(`unsupported accumulator: ${JSON.stringify(acc)}`);
+}
+
+function compileSortByOrder(spec: SortSpec, ctx: Ctx, reverse: boolean): Sql {
+  const parts: Sql[] = [];
+  for (const [field, dir] of Object.entries(spec)) {
+    const path = field.split(".");
+    const fieldExpr = jsonbPath(ctx.doc, path);
+    const effective = reverse ? -dir : dir;
+    parts.push(
+      sql`${fieldExpr} ${sql.raw(effective === 1 ? "asc" : "desc")} nulls ${sql.raw(effective === 1 ? "first" : "last")}`,
+    );
+  }
+  return sql.join(parts);
 }
 
 function compileSort(stage: SortStage, { prev }: StageInput): StageOutput {

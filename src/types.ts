@@ -18,7 +18,18 @@ export type Accumulator =
   | { $last: Expr }
   | { $push: Expr }
   | { $addToSet: Expr }
-  | { $count: object };
+  | { $count: object }
+  | { $stdDevPop: Expr }
+  | { $stdDevSamp: Expr }
+  | { $mergeObjects: Expr }
+  | { $top: { sortBy: SortSpec; output: Expr } }
+  | { $bottom: { sortBy: SortSpec; output: Expr } }
+  | { $topN: { sortBy: SortSpec; output: Expr; n: number } }
+  | { $bottomN: { sortBy: SortSpec; output: Expr; n: number } }
+  | { $minN: { input: Expr; n: number } }
+  | { $maxN: { input: Expr; n: number } }
+  | { $firstN: { input: Expr; n: number; sortBy?: SortSpec } }
+  | { $lastN: { input: Expr; n: number; sortBy?: SortSpec } };
 
 export type SortSpec = Record<string, 1 | -1>;
 
