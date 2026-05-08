@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/mascot.png" alt="GhostPress mascot — a ghost benching weights with Postgres-green plates" width="640">
+<img src="./assets/mascot.webp" alt="GhostPress mascot — a ghost benching weights with Postgres-green plates" width="640">
 
 # ghostpres
 
