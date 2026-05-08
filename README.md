@@ -7,6 +7,9 @@
 **MongoDB-shaped aggregation pipelines for Postgres jsonb.**
 *The inversion of Postgres.*
 
+[![CI](https://github.com/douglasjordan2/ghostpres/actions/workflows/ci.yml/badge.svg)](https://github.com/douglasjordan2/ghostpres/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 </div>
 
 ---
