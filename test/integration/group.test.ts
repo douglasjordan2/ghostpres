@@ -122,7 +122,7 @@ describeIf("integration: $group accumulators", () => {
     const prod = out.find((r) => r._id === "prod")!;
     expect(prod.merged.a).toBe(1);
     expect(prod.merged.c).toBe(3);
-    expect([2, 99]).toContain(prod.merged.b);
+    expect([2, 99]).toContain(prod.merged.b!);
   });
 
   test("$firstN with sortBy returns first n by sort", async () => {

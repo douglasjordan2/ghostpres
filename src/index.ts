@@ -17,7 +17,6 @@ export type {
   Stage,
   Expr,
   Document,
-  MatchFilter,
   Accumulator,
   SortSpec,
   MatchStage,
@@ -33,11 +32,26 @@ export type {
   ReplaceRootStage,
 } from "./types.ts";
 
+export type { MatchFilter as RawMatchFilter } from "./types.ts";
+
 export { aggregate, buildPipelineSql, explainPipeline } from "./pipeline.ts";
 export type { AggregateOptions, AggregateResult } from "./pipeline.ts";
 
 export { sql, compile } from "./sql.ts";
 export type { Sql, CompiledSql } from "./sql.ts";
+
+export { Pipeline, collection } from "./typed.ts";
+export type {
+  Executor as TypedExecutor,
+  MatchFilter,
+  ProjectResult,
+  AddFieldsResult,
+  LookupResult,
+  UnwindResult,
+  GroupResult,
+  CountResult,
+  AccumulatorResult,
+} from "./typed.ts";
 
 import { aggregate, type AggregateOptions, type AggregateResult } from "./pipeline.ts";
 import type { Stage } from "./types.ts";
