@@ -75,9 +75,9 @@ describeIf("integration: pipeline against real postgres", () => {
     ]);
 
     expect(orders.length).toBe(2);
-    expect(Number(orders[0]!.protection_cost)).toBe(10);
+    expect(Number(orders[0]!.protection_cost)).toBe(15);
     expect(Number(orders[1]!.protection_cost)).toBe(7.5);
-    expect(orders[0]!.packages.length).toBe(2);
+    expect(orders[0]!.packages.length).toBe(3);
   });
 
   test("$group with $sum and $push", async () => {
@@ -117,7 +117,7 @@ describeIf("integration: pipeline against real postgres", () => {
       }),
       $sort({ _id: 1 }),
     ]);
-    expect(result.length).toBe(2);
+    expect(result.length).toBe(3);
     const f1 = result.find((g) => g._id === "f1")!;
     expect(Number(f1.total)).toBe(10);
   });
@@ -142,7 +142,7 @@ describeIf("integration: pipeline against real postgres", () => {
     const orders = await g.collection("shopify_orders").run([
       $match({
         $expr: {
-          $eq: [{ $size: "$order_package_ids" }, 2],
+          $eq: [{ $size: "$order_package_ids" }, 3],
         },
       }),
     ]);

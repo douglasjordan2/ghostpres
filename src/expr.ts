@@ -232,7 +232,9 @@ const ops: Record<string, OpCompiler> = {
     const obj = arg as { input: Expr; regex: Expr; options?: Expr };
     const input = coerce(compileExpr(obj.input, ctx), "text").sql;
     const regex = coerce(compileExpr(obj.regex, ctx), "text").sql;
-    return { sql: sql`(${input} ~ ${regex})`, kind: "bool" };
+    const flags = typeof obj.options === "string" ? obj.options : "";
+    const op = flags.includes("i") ? "~*" : "~";
+    return { sql: sql`(${input} ${sql.raw(op)} ${regex})`, kind: "bool" };
   },
 
   $cond: (arg, ctx) => {

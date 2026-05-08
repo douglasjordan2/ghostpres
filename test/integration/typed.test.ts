@@ -76,7 +76,7 @@ describeIf("integration: typed pipeline", () => {
       .sort({ order_id: 1 })
       .run(exec);
 
-    expect(rows[0]!.packages.length).toBe(2);
+    expect(rows[0]!.packages.length).toBe(3);
     expect(rows[0]!.packages[0]!.tracking_number).toMatch(/T/);
   });
 
@@ -121,7 +121,7 @@ describeIf("integration: typed pipeline", () => {
       .sort({ _id: 1 })
       .run(exec);
 
-    expect(rows.length).toBe(2);
+    expect(rows.length).toBe(3);
     const f1 = rows.find((r) => r._id === "f1")!;
     expect(Number(f1.cost)).toBe(10);
   });

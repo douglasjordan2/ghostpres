@@ -49,6 +49,8 @@ describeIf("integration: shopify magnum-opus pipeline", () => {
     expect(Number(rows[1]!.protection_cost)).toBe(10);
     expect(rows[1]!.tracking).toContain("T1");
     expect(rows[1]!.tracking).toContain("T2");
+    expect(rows[1]!.tracking).not.toContain("T4");
+    expect(rows[1]!.tracking).toContain("<span>");
   });
 
   test("search narrows results", async () => {

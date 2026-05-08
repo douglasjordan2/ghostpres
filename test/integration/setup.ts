@@ -38,7 +38,7 @@ export async function seedShopify(sql: Sql): Promise<void> {
         order_total: "120.00",
         merchant_id: "m1",
         created_at: "2025-04-01T00:00:00Z",
-        order_package_ids: [1, 2],
+        order_package_ids: [1, 2, 4],
         request_ids: [],
         claim_ids: [],
       })}),
@@ -85,7 +85,7 @@ export async function seedShopify(sql: Sql): Promise<void> {
         tracking_url: "https://t/2",
         tracking_number: "T2",
         shipment_date: "2025-04-03",
-        fulfillment_id: "f1",
+        fulfillment_id: "f2",
         pact_insured_cost: 5.0,
       })}),
       (${sql.json({
@@ -93,8 +93,16 @@ export async function seedShopify(sql: Sql): Promise<void> {
         tracking_url: "https://t/3",
         tracking_number: "T3",
         shipment_date: "2025-04-04",
-        fulfillment_id: "f2",
+        fulfillment_id: "f3",
         pact_insured_cost: 7.5,
+      })}),
+      (${sql.json({
+        _id: 4,
+        tracking_url: "https://t/4",
+        tracking_number: "T4",
+        shipment_date: "2025-04-05",
+        fulfillment_id: "f1",
+        pact_insured_cost: 5.0,
       })})
   `;
 }

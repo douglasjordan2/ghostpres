@@ -1,14 +1,10 @@
+import { collection, type Pipeline, type Stage } from "../src/index.ts";
 import {
-  $match,
   $lookup,
+  $match,
   $addFields,
-  $project,
-  $sort,
-  $limit,
-  $skip,
-  type Stage,
   type Expr,
-} from "../src/index.ts";
+} from "../src/types.ts";
 
 export type Filter = "request" | "claim" | null;
 
@@ -19,6 +15,41 @@ export type ListArgs = {
   search?: string;
   page?: number;
   pageSize?: number;
+};
+
+export type ShopifyOrder = {
+  _id: string;
+  order_id: string;
+  order_name: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  order_total: string;
+  merchant_id: string;
+  created_at: string;
+  order_package_ids: number[];
+  request_ids: number[];
+  claim_ids: number[];
+};
+
+export type OrderPackage = {
+  _id: number;
+  tracking_url: string;
+  tracking_number: string;
+  shipment_date: string;
+  fulfillment_id: string;
+  pact_insured_cost: number;
+};
+
+export type OrderRow = {
+  _id: string;
+  local_id: string;
+  order_number: string;
+  customer: string;
+  order_value: string;
+  tracking: string;
+  ship_dates: string;
+  protection_cost: number;
 };
 
 const dedupByFulfillment: Expr = {
@@ -40,40 +71,20 @@ const dedupByFulfillment: Expr = {
   },
 };
 
-const trackingHtml: Expr = {
+const html = (input: string, field: string): Expr => ({
   $reduce: {
-    input: "$packages_unique",
+    input,
     initialValue: "",
     in: {
-      $concat: [
-        "$$value",
-        "<span>",
-        { $toString: "$$this.tracking_number" },
-        "</span> ",
-      ],
+      $concat: ["$$value", "<span>", { $toString: `$$this.${field}` }, "</span> "],
     },
   },
-};
+});
 
-const shipDatesHtml: Expr = {
-  $reduce: {
-    input: "$packages_unique",
-    initialValue: "",
-    in: {
-      $concat: [
-        "$$value",
-        "<span>",
-        { $toString: "$$this.shipment_date" },
-        "</span> ",
-      ],
-    },
-  },
-};
-
-export function listOrdersPipeline(args: ListArgs): Stage[] {
+export function listOrdersTyped(args: ListArgs): Pipeline<OrderRow> {
   const { merchantId, since, filter = null, search = null, page = 0, pageSize = 25 } = args;
 
-  const filterStage: Stage[] = filter
+  const filterStages: Stage[] = filter
     ? [
         $lookup({
           from: filter === "request" ? "pact_requests" : "pact_claims",
@@ -101,7 +112,7 @@ export function listOrdersPipeline(args: ListArgs): Stage[] {
     : [];
 
   const searchTerms = (search ?? "").trim().split(/\s+/).filter(Boolean);
-  const searchStage: Stage[] = searchTerms.length
+  const searchStages: Stage[] = searchTerms.length
     ? [
         $match({
           $expr: {
@@ -120,32 +131,36 @@ export function listOrdersPipeline(args: ListArgs): Stage[] {
       ]
     : [];
 
-  return [
-    $match({
-      merchant_id: merchantId,
-      $expr: { $gte: [{ $toDate: "$created_at" }, { $toDate: since }] },
-    }),
-    ...filterStage,
-    $lookup({
+  const recentForMerchant = collection<ShopifyOrder>("shopify_orders").match({
+    merchant_id: merchantId,
+    $expr: { $gte: [{ $toDate: "$created_at" }, { $toDate: since }] },
+  });
+
+  return recentForMerchant
+    .extend(filterStages)
+    .cast<ShopifyOrder>()
+    .lookup<OrderPackage, "packages">({
       from: "order_packages",
       localField: "order_package_ids",
       foreignField: "_id",
       as: "packages",
-    }),
-    $match({ "packages.0": { $exists: true } }),
-    $addFields({ packages_unique: dedupByFulfillment }),
-    $addFields({
+    })
+    .match({ "packages.0": { $exists: true } })
+    .addFields({ packages_unique: dedupByFulfillment })
+    .addFields({
       protection_cost: {
-        $sum: { $map: { input: "$packages_unique", in: "$$this.pact_insured_cost" } },
+        $sum: {
+          $map: { input: "$packages_unique", in: "$$this.pact_insured_cost" },
+        },
       },
-      tracking: trackingHtml,
-      ship_dates: shipDatesHtml,
-    }),
-    ...searchStage,
-    $sort({ order_id: -1 }),
-    $skip(page * pageSize),
-    $limit(pageSize),
-    $project({
+      tracking: html("$packages_unique", "tracking_number"),
+      ship_dates: html("$packages_unique", "shipment_date"),
+    })
+    .extend(searchStages)
+    .sort({ order_id: -1 })
+    .skip(page * pageSize)
+    .limit(pageSize)
+    .project({
       _id: "$_id",
       local_id: "$order_id",
       order_number: "$order_name",
@@ -156,19 +171,18 @@ export function listOrdersPipeline(args: ListArgs): Stage[] {
       tracking: 1,
       ship_dates: 1,
       protection_cost: 1,
-    }),
-  ];
+    })
+    .cast<OrderRow>();
 }
 
 if (import.meta.main) {
-  const { aggregate } = await import("../src/index.ts");
-  const pipeline = listOrdersPipeline({
+  const q = listOrdersTyped({
     merchantId: "m1",
     since: "2025-01-01T00:00:00Z",
     filter: "request",
     search: "ada",
   });
-  const { text, values } = aggregate(pipeline, { collection: "shopify_orders" });
+  const { text, values } = q.compile();
   console.log(text);
   console.log("---");
   console.log(values);
