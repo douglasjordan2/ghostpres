@@ -14,14 +14,29 @@
   },
   "files": [
     "src",
-    "README.md"
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "author": "Douglas Jordan",
+  "keywords": [
+    "postgres",
+    "postgresql",
+    "jsonb",
+    "mongodb",
+    "aggregation",
+    "pipeline",
+    "query-builder",
+    "drizzle",
+    "bun",
+    "typescript"
   ],
   "scripts": {
     "test": "bun test",
     "test:integration": "bun test test/integration",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo": "bun examples/run.ts"
   },
-  "private": true,
   "devDependencies": {
     "@types/bun": "latest",
     "postgres": "^3.4.9"
