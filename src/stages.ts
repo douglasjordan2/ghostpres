@@ -6,8 +6,8 @@ import {
   rootCtx,
   bindVar,
   jsonbPath,
-  literalToJsonb,
   type Ctx,
+  type Compiled,
 } from "./expr.ts";
 import type {
   Stage,
@@ -30,6 +30,7 @@ import type {
 export type StageInput = {
   prev: string;
   collection: string;
+  outerVars?: Record<string, Compiled>
 };
 
 export type StageOutput = {
@@ -63,31 +64,33 @@ export function compileStage(stage: Stage, input: StageInput): StageOutput {
   }
 }
 
-function prevCtx(prev: string): Ctx {
-  return rootCtx(sql`${sql.id(prev)}.doc`);
+function prevCtx(input: StageInput): Ctx {
+  let ctx = rootCtx(sql`${sql.id(input.prev)}.doc`)
+  for (const [k, v] of Object.entries(input?.outerVars ?? {})) ctx = bindVar(ctx, k, v)
+  return ctx
 }
 
-function compileMatch(stage: MatchStage, { prev }: StageInput): StageOutput {
-  const ctx = prevCtx(prev);
+function compileMatch(stage: MatchStage, input: StageInput): StageOutput {
+  const ctx = prevCtx(input);
   const where = compileMatchFilter(stage.filter, ctx);
   return {
-    body: sql`select ${sql.id(prev)}.id, ${sql.id(prev)}.doc from ${sql.id(prev)} where ${where}`,
+    body: sql`select ${sql.id(input.prev)}.id, ${sql.id(input.prev)}.doc from ${sql.id(input.prev)} where ${where}`,
   };
 }
 
-function compileProject(stage: ProjectStage, { prev }: StageInput): StageOutput {
-  const ctx = prevCtx(prev);
+function compileProject(stage: ProjectStage, input: StageInput): StageOutput {
+  const ctx = prevCtx(input);
   const newDoc = buildDoc(stage.doc, ctx);
   return {
-    body: sql`select ${sql.id(prev)}.id, ${newDoc} as doc from ${sql.id(prev)}`,
+    body: sql`select ${sql.id(input.prev)}.id, ${newDoc} as doc from ${sql.id(input.prev)}`,
   };
 }
 
-function compileAddFields(stage: AddFieldsStage, { prev }: StageInput): StageOutput {
-  const ctx = prevCtx(prev);
+function compileAddFields(stage: AddFieldsStage, input: StageInput): StageOutput {
+  const ctx = prevCtx(input);
   const additions = buildDoc(stage.doc, ctx);
   return {
-    body: sql`select ${sql.id(prev)}.id, (${sql.id(prev)}.doc || ${additions}) as doc from ${sql.id(prev)}`,
+    body: sql`select ${sql.id(input.prev)}.id, (${sql.id(input.prev)}.doc || ${additions}) as doc from ${sql.id(input.prev)}`,
   };
 }
 
@@ -107,31 +110,50 @@ function buildDoc(doc: Document, ctx: Ctx): Sql {
   return sql`jsonb_build_object(${sql.join(pairs)})`;
 }
 
-function compileLookup(stage: LookupStage, { prev }: StageInput): StageOutput {
-  const localPath = stage.localField.split(".");
-  const foreignField = stage.foreignField ?? "_id";
-  const localExpr = jsonbPath(sql`${sql.id(prev)}.doc`, localPath);
-  const foreignExpr = jsonbPath(sql`__t.data`, foreignField.split("."));
+function compileLookup(stage: LookupStage, input: StageInput): StageOutput {
+  const { prev } = input
+  if (!stage.localField && !(stage.pipeline && stage.pipeline.length)) {
+    throw new Error("$lookup requires localField or a non-empty pipeline")
+  }
 
-  const matchCondition = sql`(
-    case
-      when jsonb_typeof(${localExpr}) = 'array'
-        then ${foreignExpr} in (select jsonb_array_elements(${localExpr}))
-      else ${foreignExpr} = ${localExpr}
-    end
-  )`;
+  const outerCtx = prevCtx(input)
 
-  const lateral = sql`(
-    select coalesce(jsonb_agg(__t.data), '[]'::jsonb) as joined
-    from ${sql.id(stage.from)} __t
-    where ${matchCondition}
-  ) __lk`;
+  const letVars: Record<string, Compiled> = {}
+  for (const [name, expr] of Object.entries(stage.let ?? {})) {
+    letVars[name] = compileExpr(expr, outerCtx)
+  }
+  const haveLet = Object.keys(letVars).length > 0
+
+  const eqCond = stage.localField
+    ? (foreignDoc: Sql) => {
+      const local = jsonbPath(sql`${sql.id(prev)}.doc`, stage.localField!.split(".")) 
+      const fe = jsonbPath(foreignDoc, (stage.foreignField ?? "_id").split("."))
+      return sql`(case
+        when jsonb_typeof(${local}) = 'array'
+          then ${fe} in (select jsonb_array_elements(${local}))
+        else ${fe} = ${local}
+      end)`
+    } : null
+
+  let inner: Sql
+  if (stage.pipeline && stage.pipeline.length) {
+    const { ctes, last } = chainCtes(
+      stage.pipeline, 
+      { collection: stage.from }, 
+      "lk",
+      haveLet ? letVars : undefined
+    )
+
+    const where = eqCond ? sql` where ${eqCond(sql`${sql.id(last)}.doc`)}` : sql.empty()
+    inner = sql`select coalesce(jsonb_agg(doc), '[]'::jsonb) as joined from (with ${sql.join(ctes, ", ")} select doc from ${sql.id(last)}${where}) __sub`;
+  } else {
+    inner = sql`select coalesce(jsonb_agg(__t.data), '[]'::jsonb) as joined from ${sql.id(stage.from)} __t where ${eqCond!(sql`__t.data`)}`;
+  }
 
   return {
     body: sql`select ${sql.id(prev)}.id,
       (${sql.id(prev)}.doc || jsonb_build_object(${stage.as}::text, __lk.joined)) as doc
-    from ${sql.id(prev)}
-    left join lateral ${lateral} on true`,
+    from ${sql.id(prev)} left join lateral (${inner}) __lk on true`,
   };
 }
 
@@ -169,8 +191,8 @@ function compileUnwind(stage: UnwindStage, { prev }: StageInput): StageOutput {
   };
 }
 
-function compileGroup(stage: GroupStage, { prev }: StageInput): StageOutput {
-  const ctx = prevCtx(prev);
+function compileGroup(stage: GroupStage, input: StageInput): StageOutput {
+  const ctx = prevCtx(input);
   const idCompiled = coerce(compileExpr(stage._id, ctx), "jsonb").sql;
   const idAlias = sql`__id`;
   const fieldPairs: Sql[] = [sql`'_id'::text, ${idAlias}`];
@@ -185,8 +207,8 @@ function compileGroup(stage: GroupStage, { prev }: StageInput): StageOutput {
   return {
     body: sql`select md5(${idAlias}::text)::text as id, ${docExpr} as doc
       from (
-        select ${idCompiled} as __id, ${sql.id(prev)}.doc, ${sql.id(prev)}.id from ${sql.id(prev)}
-      ) ${sql.id(prev)}
+        select ${idCompiled} as __id, ${sql.id(input.prev)}.doc, ${sql.id(input.prev)}.id from ${sql.id(input.prev)}
+      ) ${sql.id(input.prev)}
       group by __id`,
   };
 }
@@ -347,10 +369,36 @@ function compileCount(stage: CountStage, { prev }: StageInput): StageOutput {
   };
 }
 
-function compileReplaceRoot(stage: ReplaceRootStage, { prev }: StageInput): StageOutput {
-  const ctx = prevCtx(prev);
+function compileReplaceRoot(stage: ReplaceRootStage, input: StageInput): StageOutput {
+  const ctx = prevCtx(input);
   const newRoot = coerce(compileExpr(stage.newRoot, ctx), "jsonb").sql;
   return {
-    body: sql`select ${sql.id(prev)}.id, ${newRoot} as doc from ${sql.id(prev)}`,
+    body: sql`select ${sql.id(input.prev)}.id, ${newRoot} as doc from ${sql.id(input.prev)}`,
   };
+}
+
+export type ChainOpts = { collection: string; idColumn?: string; dataColumn?: string; baseFilter?: Sql }
+
+export function chainCtes(
+  stages: Stage[],
+  opts: ChainOpts,
+  prefix = "s",
+  outerVars?: Record<string, Compiled>
+): { ctes: Sql[]; last: string } {
+  const idCol = opts.idColumn ?? "id", dataCol = opts.dataColumn ?? "data";
+  const base = `${prefix}0`
+  const where = opts.baseFilter ? sql` where ${opts.baseFilter}` : sql.empty();
+  const baseSelect = sql`select ${sql.id(idCol)} as id, ${sql.id(dataCol)} as doc from
+  ${sql.id(opts.collection)}${where}`;
+  const ctes = [sql`${sql.id(base)} as (${baseSelect})`]
+
+  let prev = base
+  for (let i = 0; i < stages.length; i++) {
+    const name = `${prefix}${i + 1}`;
+    const { body } = compileStage(stages[i]!, { prev, collection: opts.collection, outerVars })
+    ctes.push(sql`${sql.id(name)} as (${body})`)
+    prev = name
+  }
+
+  return { ctes, last: prev }
 }

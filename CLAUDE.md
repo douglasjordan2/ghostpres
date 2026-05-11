@@ -77,13 +77,15 @@ docker run -d --name ghostpres-pg \
 
 ## Type-inference quirks worth knowing
 
-- `Pipeline.lookup<TFrom, TAs>(...)` requires **both** type params to get the typed result. With only `<TFrom>`, TypeScript leaves `TAs` as the default `string` and the lookup result widens — an unavoidable TS limitation around partial generic argument inference. Document this in user-facing places.
+- `Pipeline.lookup(...)` has two overloads: the equality form `<TFrom, TAs>` and the sub-pipeline form `<TFrom, TOut, TAs>` (where `TOut` is the sub-pipeline's output element type). Either way, supplying only *some* type params lets `TAs` widen to the default `string` and the lookup result key widens with it — an unavoidable TS limitation around partial generic argument inference. Pass **all** the type params (`lookup<Comment, "author">` / `lookup<Comment, Comment, "topComments">`) when you want the result key strongly typed. Document this in user-facing places. The non-generic implementation signature (`Pipeline<any>`) is invisible to callers — it just has to be assignable-from both overloads.
 - `const TSpec extends Document` on `project` / `addFields` preserves literal `1`/`true` so inclusion vs. expression branches resolve correctly.
 - `MatchFilter<TDoc>` is intentionally permissive (allows arbitrary string keys for nested paths). Don't tighten without checking that `tags: "x"`-style scalar-against-array usage still typechecks.
 
 ## What's intentionally not implemented
 
-`$lookup` with a sub-pipeline. `$facet`, `$bucket`, `$bucketAuto`, `$graphLookup`, `$merge`, `$out`. Geospatial. Don't add stubs that throw — add the real thing or leave it out.
+`$facet`, `$bucket`, `$bucketAuto`, `$graphLookup`, `$merge`, `$out`. Geospatial. Don't add stubs that throw — add the real thing or leave it out.
+
+(`$lookup` with a sub-pipeline *is* implemented — `pipeline?: Stage[]` + `let?` on `LookupStage`; the sub-pipeline compiles via `chainCtes(..., "lk", letVars)` to a nested `WITH` inside the lateral subquery. See `compileLookup` in `src/stages.ts`.)
 
 ## Library philosophy
 

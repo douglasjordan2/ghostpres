@@ -39,9 +39,10 @@ export type AddFieldsStage = { $: "addFields"; doc: Document };
 export type LookupStage = {
   $: "lookup";
   from: string;
-  localField: string;
+  localField?: string;
   foreignField?: string;
   as: string;
+  let?: Record<string, Expr>;
   pipeline?: Stage[];
 };
 export type UnwindStage = {
