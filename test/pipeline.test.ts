@@ -109,9 +109,48 @@ describe("$lookup", () => {
         as: "packages",
       }),
     ], opts);
-    expect(text).toContain("left join lateral");
+    expect(text).toContain("left join lateral (");
+    expect(text).toContain(") __lk on true");
     expect(text).toContain("jsonb_agg");
     expect(text).toContain('"order_packages"');
+    expect(text).not.toContain('"lk0"');
+  });
+
+  test("sub-pipeline compiles to a nested WITH chain inside the lateral", () => {
+    const { text } = aggregate([
+      $lookup({
+        from: "order_packages",
+        let: { oid: "$_id" },
+        pipeline: [
+          $match({ $expr: { $eq: ["$order_id", "$$oid"] } }),
+          $sort({ shipped_at: -1 }),
+          $limit(2),
+        ],
+        as: "packages",
+      }),
+    ], opts);
+    expect(text).toContain("left join lateral (");
+    expect(text).toContain(") __sub");
+    expect(text).toContain('"lk0" as (');
+    expect(text).toContain('"lk1" as (');
+    expect(text).toContain('"lk2" as (');
+    expect(text).toContain('"lk3" as (');
+    expect(text).toContain('select doc from "lk3"');
+    expect(text).toContain('"s0".doc #>');
+  });
+
+  test("localField is ANDed onto the sub-pipeline's final select", () => {
+    const { text } = aggregate([
+      $lookup({
+        from: "order_packages",
+        localField: "order_package_ids",
+        foreignField: "_id",
+        pipeline: [$sort({ shipped_at: -1 })],
+        as: "packages",
+      }),
+    ], opts);
+    expect(text).toContain('"lk1" as (');
+    expect(text).toContain('select doc from "lk1" where');
   });
 });
 

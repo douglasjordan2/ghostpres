@@ -15,7 +15,6 @@ import {
   type Document,
   type SortSpec,
   type Accumulator,
-  type LookupStage,
   type UnwindStage,
 } from "./types.ts";
 import { aggregate, type AggregateOptions, type AggregateResult } from "./pipeline.ts";
@@ -178,8 +177,37 @@ export class Pipeline<TIn> {
     localField: string;
     foreignField?: string;
     as: TAs;
-  }): Pipeline<LookupResult<TIn, TFrom, TAs>> {
-    return this.next($lookup({ ...opts, as: opts.as as string }));
+  }): Pipeline<LookupResult<TIn, TFrom, TAs>>;
+  lookup<TFrom = unknown, TOut = unknown, const TAs extends string = string>(opts: {
+    from: string;
+    as: TAs;
+    localField?: string;
+    foreignField?: string;
+    let?: Record<string, Expr>;
+    pipeline: (q: Pipeline<TFrom>) => Pipeline<TOut>;
+  }): Pipeline<LookupResult<TIn, TOut, TAs>>;
+  lookup(opts: {
+    from: string;
+    as: string;
+    localField?: string;
+    foreignField?: string;
+    let?: Record<string, Expr>;
+    pipeline?: (q: Pipeline<any>) => Pipeline<any>;
+  }): Pipeline<any> {
+    const sub =
+      typeof opts.pipeline === "function"
+        ? [...opts.pipeline(new Pipeline(opts.from, [], this.options)).stages]
+        : undefined;
+    return this.next(
+      $lookup({
+        from: opts.from,
+        as: opts.as,
+        localField: opts.localField,
+        foreignField: opts.foreignField,
+        let: opts.let,
+        pipeline: sub,
+      }),
+    );
   }
 
   unwind<const TPath extends string>(

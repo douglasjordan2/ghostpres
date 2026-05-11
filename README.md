@@ -99,6 +99,43 @@ left join lateral (
 
 Each stage becomes its own CTE, so you can comment out a tail stage and the prefix is independently inspectable with `EXPLAIN` — useful for debugging in a way Mongo's pipeline never was.
 
+### `$lookup` with a sub-pipeline
+
+Pass a `pipeline` to filter / sort / project / limit the joined documents, and `let` to bind values from the outer document into it as `$$`-variables (the correlated form):
+
+```ts
+const feed = await collection<Post>("posts")
+  .lookup<Comment, Comment, "topComments">({
+    from: "comments",
+    let: { pid: "$_id" },
+    pipeline: (q) =>
+      q.match({ $expr: { $eq: ["$post_id", "$$pid"] } })
+       .sort({ created_at: -1 })
+       .limit(3),
+    as: "topComments",
+  })
+  .run(executor);
+```
+
+The sub-pipeline compiles to its own `WITH lk0 … lkN` chain *inside* the lateral subquery — still one CTE per stage, still `EXPLAIN`-inspectable:
+
+```sql
+left join lateral (
+  select coalesce(jsonb_agg(doc), '[]'::jsonb) as joined
+  from (
+    with lk0 as (select id, data as doc from comments),
+         lk1 as (select lk0.id, lk0.doc from lk0 where /* $match: $expr post_id == $$pid */),
+         lk2 as (select lk1.id, lk1.doc from lk1 order by /* $sort created_at desc */),
+         lk3 as (select lk2.id, lk2.doc from lk2 limit 3)
+    select doc from lk3
+  ) __sub
+) __lk on true
+```
+
+`localField`/`foreignField` and `pipeline` can be combined — the equality join is ANDed onto the sub-pipeline's final select. Without `let`, the sub-pipeline is uncorrelated and Postgres evaluates it once.
+
+> **Type-inference note:** `.lookup()` on the typed builder has two forms — the plain `<TFrom, TAs>` equality form and the `<TFrom, TOut, TAs>` pipeline form, where `TOut` is the element type the sub-pipeline produces. As with the equality form, supplying only some of the type arguments lets `TAs` widen to `string` (a TypeScript partial-inference limitation); pass all of them — `.lookup<Comment, Comment, "topComments">({ … })` — when you want the result key strongly typed. The raw `$lookup({ from, localField?, foreignField?, as, let?, pipeline? })` stage helper takes `pipeline` as a plain `Stage[]`.
+
 ## Examples
 
 `examples/blog.ts` and `examples/blog-typed.ts` build three pipelines over a small users / posts / comments schema:
@@ -147,7 +184,6 @@ The `executor` interface is intentionally minimal (`{ unsafe(text, values) => Pr
 
 ## What's not (yet) supported
 
-- `$lookup` with a `pipeline` sub-stage. Plain local/foreign-field lookup only.
 - `$facet`, `$bucket`, `$bucketAuto`, `$graphLookup`, `$merge`, `$out`. (`$count` is supported.)
 - Geospatial (`$geoNear` and friends).
 - `$expr` is supported, but the JSONPath subset Mongo uses for `$expr` arguments is mapped opportunistically — if you hit something missing, file an issue with the expression and we'll wire it up.
